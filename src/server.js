@@ -196,6 +196,14 @@ async function ensureGatewayRunning() {
   return { ok: true };
 }
 
+function isGatewayStarting() {
+  return gatewayStarting !== null;
+}
+
+function isGatewayReady() {
+  return gatewayProc !== null && gatewayStarting === null;
+}
+
 async function restartGateway() {
   if (gatewayProc) {
     try {
@@ -749,6 +757,10 @@ app.use(async (req, res) => {
   }
 
   if (isConfigured()) {
+    if (isGatewayStarting() && !isGatewayReady()) {
+      return res.sendFile(path.join(process.cwd(), "src", "public", "loading.html"));
+    }
+
     try {
       await ensureGatewayRunning();
     } catch (err) {
@@ -770,6 +782,12 @@ const server = app.listen(PORT, () => {
   console.log(`[wrapper] listening on port ${PORT}`);
   console.log(`[wrapper] setup wizard: http://localhost:${PORT}/setup`);
   console.log(`[wrapper] configured: ${isConfigured()}`);
+
+  if (isConfigured()) {
+    ensureGatewayRunning().catch((err) => {
+      console.error(`[wrapper] failed to start gateway at boot: ${err.message}`);
+    });
+  }
 });
 
 server.on("upgrade", async (req, socket, head) => {
