@@ -473,26 +473,71 @@ function buildOnboardArgs(payload) {
 }
 
 function runCmd(cmd, args, opts = {}) {
+  const timeoutMs = opts.timeout ?? 120_000; // 2 minute default timeout
+  
   return new Promise((resolve) => {
+    let resolved = false;
+    let out = "";
+    
+    // Log spawn attempt for debugging
+    console.log(`[runCmd] Spawning: ${cmd} ${args.slice(0, 3).join(" ")}...`);
+    console.log(`[runCmd] OPENCLAW_ENTRY exists: ${fs.existsSync(OPENCLAW_ENTRY)}`);
+    
     const proc = childProcess.spawn(cmd, args, {
       ...opts,
+      stdio: ["pipe", "pipe", "pipe"],
       env: {
         ...process.env,
         OPENCLAW_STATE_DIR: STATE_DIR,
         OPENCLAW_WORKSPACE_DIR: WORKSPACE_DIR,
+        // Ensure non-interactive mode
+        CI: "true",
+        TERM: "dumb",
       },
     });
 
-    let out = "";
-    proc.stdout?.on("data", (d) => (out += d.toString("utf8")));
-    proc.stderr?.on("data", (d) => (out += d.toString("utf8")));
+    // Close stdin immediately to prevent waiting for input
+    proc.stdin?.end();
 
-    proc.on("error", (err) => {
-      out += `\n[spawn error] ${String(err)}\n`;
-      resolve({ code: 127, output: out });
+    proc.stdout?.on("data", (d) => {
+      const chunk = d.toString("utf8");
+      out += chunk;
+      console.log(`[runCmd stdout] ${chunk.substring(0, 200)}`);
+    });
+    
+    proc.stderr?.on("data", (d) => {
+      const chunk = d.toString("utf8");
+      out += chunk;
+      console.log(`[runCmd stderr] ${chunk.substring(0, 200)}`);
     });
 
-    proc.on("close", (code) => resolve({ code: code ?? 0, output: out }));
+    // Timeout handler
+    const timer = setTimeout(() => {
+      if (!resolved) {
+        resolved = true;
+        out += `\n[timeout] Command timed out after ${timeoutMs}ms\n`;
+        try { proc.kill("SIGKILL"); } catch {}
+        resolve({ code: 124, output: out });
+      }
+    }, timeoutMs);
+
+    proc.on("error", (err) => {
+      if (!resolved) {
+        resolved = true;
+        clearTimeout(timer);
+        out += `\n[spawn error] ${String(err)}\n`;
+        resolve({ code: 127, output: out });
+      }
+    });
+
+    proc.on("close", (code) => {
+      if (!resolved) {
+        resolved = true;
+        clearTimeout(timer);
+        console.log(`[runCmd] Closed with code: ${code}, output length: ${out.length}`);
+        resolve({ code: code ?? 0, output: out });
+      }
+    });
   });
 }
 
