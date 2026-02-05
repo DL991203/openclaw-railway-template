@@ -564,10 +564,42 @@ app.post("/setup/api/run", requireSetupAuth, async (req, res) => {
       return res.status(400).json({ ok: false, output: validationError });
     }
     const onboardArgs = buildOnboardArgs(payload);
+    
+    // Log the command being run (for debugging, redact sensitive info)
+    const safeArgs = onboardArgs.map((arg, i) =>
+      onboardArgs[i - 1] === "--token" || onboardArgs[i - 1] === "--gateway-token" || 
+      onboardArgs[i - 1] === "--anthropic-api-key" || onboardArgs[i - 1] === "--openai-api-key" ||
+      onboardArgs[i - 1] === "--openrouter-api-key" || onboardArgs[i - 1] === "--gemini-api-key"
+        ? "[REDACTED]" : arg
+    );
+    console.log(`[setup] Running: ${OPENCLAW_NODE} ${clawArgs(safeArgs).join(" ")}`);
+    console.log(`[setup] STATE_DIR: ${STATE_DIR}`);
+    console.log(`[setup] WORKSPACE_DIR: ${WORKSPACE_DIR}`);
+    console.log(`[setup] Config path: ${configPath()}`);
+    
     const onboard = await runCmd(OPENCLAW_NODE, clawArgs(onboardArgs));
+    
+    // Log the result
+    console.log(`[setup] Onboard exit code: ${onboard.code}`);
+    console.log(`[setup] Onboard output length: ${onboard.output?.length || 0}`);
+    console.log(`[setup] Onboard output: ${onboard.output || "(empty)"}`);
+    console.log(`[setup] Config exists: ${isConfigured()}`);
 
     let extra = "";
     extra += `\n[setup] Onboarding exit=${onboard.code} configured=${isConfigured()}\n`;
+    
+    // If onboarding failed, add more debug info
+    if (onboard.code !== 0 || !isConfigured()) {
+      extra += `[setup] Debug info:\n`;
+      extra += `  - Output length: ${onboard.output?.length || 0} chars\n`;
+      extra += `  - Config path: ${configPath()}\n`;
+      extra += `  - Config exists: ${isConfigured()}\n`;
+      extra += `  - STATE_DIR: ${STATE_DIR}\n`;
+      extra += `  - WORKSPACE_DIR: ${WORKSPACE_DIR}\n`;
+      if (!onboard.output || onboard.output.trim().length === 0) {
+        extra += `  - WARNING: Onboard output is empty!\n`;
+      }
+    }
 
     const ok = onboard.code === 0 && isConfigured();
 
@@ -679,9 +711,12 @@ app.post("/setup/api/run", requireSetupAuth, async (req, res) => {
       extra += "[setup] Gateway started.\n";
     }
 
+    // Ensure output is always visible, even if empty
+    const fullOutput = onboard.output || "(no output from onboard command)";
+    
     return res.status(ok ? 200 : 500).json({
       ok,
-      output: `${onboard.output}${extra}`,
+      output: `${fullOutput}${extra}`,
     });
   } catch (err) {
     console.error("[/setup/api/run] error:", err);
