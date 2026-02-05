@@ -21,10 +21,14 @@ COPY src ./src
 
 RUN useradd -m -s /bin/bash openclaw \
   && chown -R openclaw:openclaw /app \
-  && mkdir -p /data && chown openclaw:openclaw /data
+  && mkdir -p /data/.openclaw /data/workspace \
+  && chown -R openclaw:openclaw /data
 
 ENV PORT=8080
+ENV HOME=/home/openclaw
 ENV OPENCLAW_ENTRY=/usr/local/lib/node_modules/openclaw/dist/entry.js
+ENV OPENCLAW_STATE_DIR=/data/.openclaw
+ENV OPENCLAW_WORKSPACE_DIR=/data/workspace
 EXPOSE 8080
 
 # Health check: wait 60s for server to start, then check every 30s
